@@ -214,11 +214,9 @@ def fetch_all_live():
 # AUTO REFRESH
 # ══════════════════════════════════════════════════════
 try:
-    import importlib
-    st_autorefresh = importlib.import_module("streamlit_autorefresh").st_autorefresh
+    from streamlit_autorefresh import st_autorefresh
     st_autorefresh(interval=300_000, key="r")
-except Exception:
-    pass
+except: pass
 
 # ══════════════════════════════════════════════════════
 # LOAD DATA  — must happen before any widget
@@ -436,29 +434,43 @@ tab1,tab2,tab3,tab4 = st.tabs(["🗺️ Live Map","📊 All Areas","📈 Trends"
 with tab1:
     st.markdown("#### Real-time AQI across Dubai — hover each area for details")
     if not latest.empty:
-        fig = go.Figure()
+        # build single-trace map using Scattermap (replaces deprecated Scattermapbox)
+        lats, lons, texts, colors, sizes = [], [], [], [], []
+        hover_texts = []
         for _,row in latest.iterrows():
             av  = sf(row.get("aqi"))
             lb,_ = aqi_label(av)
             lat = sf(row.get("latitude"))  or LOCATIONS[row["neighbourhood"]]["lat"]
             lon = sf(row.get("longitude")) or LOCATIONS[row["neighbourhood"]]["lon"]
-            fig.add_trace(go.Scattermapbox(
-                lat=[lat], lon=[lon],
-                mode="markers+text",
-                marker=dict(size=max(18,min(55,av/2.5 if av>0 else 15)), color=aqi_color(av), opacity=0.85),
-                text=[row["neighbourhood"]],
-                textposition="top center",
-                textfont=dict(color="white",size=11),
-                customdata=[[row["neighbourhood"],f"{int(av)}",lb,f"{sf(row.get('pm2_5')):.1f}",f"{sf(row.get('temperature')):.1f}"]],
-                hovertemplate="<b>%{customdata[0]}</b><br>AQI: %{customdata[1]} — %{customdata[2]}<br>PM2.5: %{customdata[3]} µg/m³<br>Temp: %{customdata[4]}°C<extra></extra>",
-                showlegend=False
-            ))
+            lats.append(lat)
+            lons.append(lon)
+            texts.append(row["neighbourhood"])
+            colors.append(aqi_color(av))
+            sizes.append(max(18, min(55, av/2.5 if av>0 else 15)))
+            hover_texts.append(
+                f"<b>{row['neighbourhood']}</b><br>"
+                f"AQI: {int(av)} — {lb}<br>"
+                f"PM2.5: {sf(row.get('pm2_5')):.1f} µg/m³<br>"
+                f"Temp: {sf(row.get('temperature')):.1f}°C"
+            )
+
+        fig = go.Figure(go.Scattermap(
+            lat=lats, lon=lons,
+            mode="markers+text",
+            marker=dict(size=sizes, color=colors, opacity=0.85),
+            text=texts,
+            textposition="top center",
+            textfont=dict(color="white", size=11),
+            hovertext=hover_texts,
+            hoverinfo="text",
+            showlegend=False
+        ))
         fig.update_layout(
-            mapbox=dict(style="carto-darkmatter", center=dict(lat=25.2048,lon=55.2708), zoom=10.5),
+            map=dict(style="carto-darkmatter", center=dict(lat=25.2048, lon=55.2708), zoom=10.5),
             margin=dict(l=0,r=0,t=0,b=0), height=480,
             paper_bgcolor="#111827"
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, key="map_chart")
         st.markdown('<div style="display:flex;gap:18px;flex-wrap:wrap;font-size:0.78rem;color:#7c8db5;padding:4px 0"><span><span style="color:#22c55e">●</span> Good (0–50)</span><span><span style="color:#f59e0b">●</span> Moderate (51–100)</span><span><span style="color:#f97316">●</span> Sensitive (101–150)</span><span><span style="color:#ef4444">●</span> Unhealthy (151–200)</span><span><span style="color:#9333ea">●</span> Hazardous (200+)</span></div>', unsafe_allow_html=True)
     else:
         st.info("Waiting for data...")
